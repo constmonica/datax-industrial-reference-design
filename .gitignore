@@ -1,0 +1,18 @@
+# Python bytecode. Regenerated on import and tied to one CPython version
+# (the filenames carry it), so it is never worth committing.
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Bench-local configuration written by the Configure button. A saved board
+# list describes one bench, not the reference design -- keep yours out of
+# version control. Remove these two lines if you want to ship a worked
+# example alongside the README.
+boards.json
+bench*.json
+
+# Virtualenvs and editor scratch
+.venv/
+venv/
+*.swp
+.DS_Store

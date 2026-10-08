@@ -1,0 +1,16 @@
+# Both of these are optional -- the app starts and every panel works without
+# them. Install them for the full experience; see README.md.
+#
+#   matplotlib  the live temperature trend chart. Without it the sensor card
+#               keeps its readout, statistics and sample table, and the plot
+#               area is simply absent.
+#   Pillow      smooth (Lanczos) scaling of the header logo. Without it Tk's
+#               integer-only subsample is used, which looks coarse on a
+#               high-density display.
+#
+# Everything else the app needs is in the Python standard library, including
+# tkinter -- though some distributions package that separately
+# (Debian/Ubuntu: apt install python3-tk).
+
+matplotlib>=3.5
+Pillow>=9.0
