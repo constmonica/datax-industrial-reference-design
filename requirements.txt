@@ -1,12 +1,10 @@
-# Both of these are optional -- the app starts and every panel works without
-# them. Install them for the full experience; see README.md.
+# Required by the control panel (RPI_T1LPSE). See README.md.
 #
-#   matplotlib  the live temperature trend chart. Without it the sensor card
-#               keeps its readout, statistics and sample table, and the plot
-#               area is simply absent.
+#   matplotlib  the live temperature trend chart.
 #   Pillow      smooth (Lanczos) scaling of the header logo. Without it Tk's
 #               integer-only subsample is used, which looks coarse on a
 #               high-density display.
+#
 #
 # Everything else the app needs is in the Python standard library, including
 # tkinter -- though some distributions package that separately

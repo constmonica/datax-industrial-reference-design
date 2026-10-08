@@ -43,26 +43,139 @@ reference design app.
   ```sh
   sudo apt install python3-tk        # Debian / Ubuntu
   ```
-- **Optional:** `matplotlib` for the trend chart, `Pillow` for smooth logo
-  scaling. The app runs fully without either.
+- **`matplotlib`** for the temperature trend chart and **`Pillow`** for sharp
+  logo scaling. Install both:
+
+  ```sh
+  pip3 install -r requirements.txt
+  ```
+
+Both are needed only by the control panel in `RPI_T1LPSE/`. The CN0575
+command server in `RPI_CN0575/` needs nothing beyond the standard library on
+a normal Kuiper setup — the one exception is `smbus2`, and only if the sensor
+has to be read over direct I²C. See *Deploying to the hardware* below.
+
+## Getting started
+
+| Machine | Image | Runs |
+|---|---|---|
+| RPi 5 + AD-RPI-T1L-PSE shield | **ADI Kuiper Linux** | `RPI_T1LPSE/datax-industrial.py` — the GUI |
+| RPi 4 + EVAL-CN0575-RPIZ | **ADI Kuiper Linux** | `RPI_CN0575/cn0575_state_machine.py` — the command server |
+
+### 1. Flash the SD cards
+
+Both cards get **ADI Kuiper Linux**. It is the distribution that carries the
+ADI driver stack and device-tree overlays, and each node depends on a
+different one of them: the T1L PSE shield needs its overlay to bring the
+10BASE-T1L PHY up at all, and without it there is no T1L link for anything
+else to run over. The CN0575 node needs its overlay to expose the ADT75 as an
+IIO device.
+
+Download the image from ADI's wiki, under *Resources → Tools & Software →
+Linux Software → ADI Kuiper Linux*, and write it to both cards. Raspberry Pi
+Imager ("Use custom" → select the `.img`) is the easiest route; balenaEtcher
+or `dd` work equally well. Decompress the archive first if it ships
+compressed.
+
+#### Enable the device-tree overlays
+
+Add the line for that node to `/boot/config.txt` and **reboot** — the change
+takes effect at boot, not immediately. On newer images the file lives at
+`/boot/firmware/config.txt` instead.
+
+| Node | Line to add |
+|---|---|
+| RPi + AD-RPI-T1L-PSE shield | `dtoverlay=rpi-tl1pse-class12` |
+| RPi + EVAL-CN0575-RPIZ | `dtoverlay=rpi-cn0575` |
+
+`class12` selects the PoDL power class the PSE advertises, so this is also the
+line to revisit if the shield is meant to source a different class.
+
+#### Verify before going further
+
+On the T1L PSE node, confirm the PHY came up and has a link:
+
+```sh
+ip link                        # the T1L interface should be present and UP
+```
+
+On the CN0575 node, confirm the sensor is bound to a driver:
+
+```sh
+ls /sys/bus/iio/devices/
+cat /sys/bus/iio/devices/iio:device0/name     # expect: adt75
+```
+
+If a device reports `adt75`, the server's preferred read path will work. If
+nothing appears there, check for `/sys/class/hwmon/hwmon*/temp1_input`, which
+is the second path it tries; if neither exists, the sensor can still be read
+over direct I²C at address `0x48` with `smbus2` installed. All three are
+described under *The CN0575 command server*.
+
+### 2. Clone the repository on both machines
+
+The same clone on each — the control panel host and the CN0575 node:
+
+```sh
+git clone https://github.com/constmonica/datax-industrial-reference-design.git
+cd datax-industrial-reference-design
+```
+
+On the **control panel host**, install its two dependencies:
 
 ```sh
 pip3 install -r requirements.txt
 ```
 
-Both are needed only by the control panel in `RPI_T1LPSE/`. The CN0575
-command server in `RPI_CN0575/` uses nothing outside the standard library, so
-that Pi needs no `pip3` step at all.
+The **CN0575 node** needs no `pip3` step at this point; its server is standard
+library only unless it has to fall back to direct I²C, which step 4 covers.
 
-## Quick start
+### 3. Check the control panel in demo mode
 
-Try it with no hardware attached:
+On the control panel host:
 
 ```sh
 python3 RPI_T1LPSE/datax-industrial.py --demo
 ```
 
-Then point it at your own boards:
+Demo mode needs no hardware and no network — every panel is driven by
+synthetic data. It is the quickest way to confirm Python, `tkinter` and both
+dependencies are in place before any addresses are involved. You should get
+the window shown at the top of this README, with a live trend chart.
+
+### 4. Start the command server on the CN0575 node
+
+On the EVAL-CN0575-RPIZ:
+
+```sh
+cd RPI_CN0575
+python3 cn0575_state_machine.py
+```
+
+It prints each request and response, so you can watch the control panel's
+`READ_TEMP` calls arrive. Only this one file is needed on that Pi — cloning
+the whole repository in step 2 is merely the easiest way to get it there.
+
+Install `smbus2` **only** if step 1 showed the sensor is reachable through
+neither IIO nor hwmon, and it has to fall back to direct I²C:
+
+```sh
+pip3 install smbus2
+```
+
+This server has to be running before the control panel can read a
+temperature. If it is not, the CN0575 card still shows as reachable — ICMP and
+the TCP connect check are answered by the Pi itself, not by this script — but
+no reading appears. That is the intended behaviour, not a fault to chase.
+
+For a bench you return to, run it under systemd rather than a terminal, so it
+survives a reboot and a closed SSH session.
+
+### 5. Point the app at your boards
+
+Restart the control panel without `--demo` and set your real addresses. Either
+press **Configure** in the header and type them in — see *Editing it from the
+app* — or pass them on the command line:
 
 ```sh
 python3 RPI_T1LPSE/datax-industrial.py \
@@ -71,6 +184,13 @@ python3 RPI_T1LPSE/datax-industrial.py \
     --cn0575 10.0.0.9 \
     --port 10000
 ```
+
+Press **Test all**. Each board should go green on both checks, and the CN0575
+card should return a temperature from the server started in step 4.
+
+The APARD32690 and SWIOT1L nodes need nothing from this repository — the app
+only opens a TCP connection to each one to prove it is alive. See *What the
+boards have to implement* for that contract.
 
 ## Configuring your network
 
@@ -85,9 +205,6 @@ subnet, so all three network values are user-supplied.
 | `--port N` | TCP command port, shared by every board. |
 | `--config FILE` | The same three settings as JSON. |
 
-Addresses may be IPv4 literals, IPv6 literals, or hostnames — anything
-resolvable through DNS, mDNS or `/etc/hosts`. A typo is reported at startup
-rather than surfacing later as a mystery timeout.
 
 For a bench you return to, keep a config file:
 
@@ -189,15 +306,11 @@ makes the server's own error replies safe: they are reported, not plotted.
 ### The CN0575 command server
 
 `RPI_CN0575/cn0575_state_machine.py` is a working implementation of the above,
-for the EVAL-CN0575-RPIZ. Copy it to that Pi and run it:
+for the EVAL-CN0575-RPIZ — see *Deploying to the hardware* for getting it onto
+the Pi and running it.
 
-```sh
-python3 cn0575_state_machine.py
-```
-
-It listens on `0.0.0.0:10000` — matching the app's default port — and serves
-one command per connection, logging each request and response to stdout. Only
-the standard library is required.
+It listens on `0.0.0.0:10000`, matching the app's default port, and serves one
+command per connection, logging each request and response to stdout.
 
 | Request | Response |
 |---|---|
@@ -216,7 +329,9 @@ across driver setups:
 2. **hwmon** — the first `/sys/class/hwmon/hwmon*/temp1_input`, in
    millidegrees.
 3. **Direct I²C** — `smbus2` against address `0x48`, decoding the ADT75's
-   12-bit two's-complement register at 0.0625 °C per LSB.
+   12-bit two's-complement register at 0.0625 °C per LSB. This is the only
+   step that needs a package installed (`pip3 install smbus2`); the first two
+   use the standard library alone.
 
 If all three fail it answers `ERR:SENSOR_FAIL`, which the app logs and shows
 as a reachable board with no reading.
@@ -225,26 +340,6 @@ Two limits worth knowing before you build on it: it is single-threaded with a
 backlog of one, so it serves one client at a time, and it reads once per
 connection rather than framing a stream. That suits this app's one-shot
 request pattern and is not a general-purpose server.
-
-## Display scaling
-
-The window sizes itself to the monitor it opens on and derives one density
-factor from that monitor's height, normalised by the DPI the X server reports.
-Everything — type scale, spacing, corner radii, chart dpi — is expressed
-against that factor, so the UI keeps its proportions from a 1080p panel up to
-a 4K one instead of rendering at a third of its intended size. Override with
-`--ui-scale` if the autodetected value does not suit your display.
-
-## Window chrome
-
-By default the app uses your window manager's title bar. `--custom-titlebar`
-replaces it with a thicker bar drawn by the app, with its own
-minimise / maximise / close, drag-to-move, double-click-to-maximise and a
-resize grip in the status bar.
-
-The trade is explicit: an override-redirect window gives up WM snapping and
-edge-resize, and on some window managers its taskbar entry and alt-tab slot as
-well. That is why it is opt-in.
 
 ## Architecture
 
@@ -259,30 +354,15 @@ what you copy onto one Raspberry Pi.
 | `RPI_CN0575/cn0575_state_machine.py` | The board-side command server for the EVAL-CN0575-RPIZ. See *The CN0575 command server* below. |
 | `docs/` | Screenshots used by this README. |
 
-Layout is two columns — telemetry and a board rail — above a full-width
-activity log. A full-width chart on a 16:10 screen can only ever be a flat
-band around 7:1, and buying it height starves every other panel; its own
-column gets it near 2:1 and frees the height the log needs. Row and column
-weights divide the space, so the proportions survive a resize or a different
-screen.
-
-Colour is not decoration here. Status text is per-theme because the shade that
-clears 4.5:1 on a white card does not clear it on a dark one; every themed text
-pair is held at or above that ratio, and the measured figures are recorded in
-the comments beside each token in `design_system.py`. `text_dis` is reserved
-for genuinely inactive controls, which WCAG exempts; use `muted` for real but
-tertiary text.
 
 ## Troubleshooting
 
 **Every board shows "Unreachable".** Check you are on the T1L subnet and that
-your addresses are right (`--board`, `--cn0575`). Unprivileged ICMP needs
-`net.ipv4.ping_group_range` to include your group on some distributions; if
-ping is restricted, the TCP connect check still works and is the more
-meaningful liveness signal.
+your addresses are right (`--board`, `--cn0575`). 
 
-**No chart.** `matplotlib` is not installed — `pip3 install -r
-requirements.txt`. Everything else in the sensor card still works.
+**No chart.** `matplotlib` is not installed; the install step was missed or
+failed. Run `pip3 install -r requirements.txt` and restart. The rest of the
+sensor card — readout, statistics and sample table — works meanwhile.
 
 **My saved edits did not come back.** Command-line flags outrank the saved
 file, so launching with `--board` or `--port` overrides it for that run — the
